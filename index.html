@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TypeCode — コード×日本語タイピングゲーム</title>
+  <meta name="description" content="JavaScript・Python・HTMLなどのコードと日本語を両方タイプ練習できるゲーム。バニラJSのみで作成。">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- パーティクル用キャンバス（全画面オーバーレイ） -->
+  <canvas id="particle-canvas" aria-hidden="true"></canvas>
+
+  <!-- ========== スタート画面 ========== -->
+  <div id="screen-start" class="screen screen-start" role="main">
+
+    <div class="start-logo" aria-label="TypeCode">
+      Type<span class="logo-accent">Code</span>
+      <span class="logo-sub">コード × 日本語 タイピングゲーム</span>
+    </div>
+
+    <!-- モード選択 -->
+    <div class="selector-group" role="group" aria-label="モード選択">
+      <div class="selector-label">Mode <span class="selector-hint">モード</span></div>
+      <div class="selector-btns" id="mode-btns">
+        <button class="sel-btn active" data-mode="code">
+          <span class="sel-icon">💻</span>
+          <span class="sel-main">Code</span>
+          <span class="sel-sub">コード入力</span>
+        </button>
+        <button class="sel-btn" data-mode="japanese">
+          <span class="sel-icon">🇯🇵</span>
+          <span class="sel-main">日本語</span>
+          <span class="sel-sub">ローマ字入力</span>
+        </button>
+        <button class="sel-btn" data-mode="mix">
+          <span class="sel-icon">⚡</span>
+          <span class="sel-main">Mix</span>
+          <span class="sel-sub">コード + 日本語</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 言語選択（Code モード時のみ表示） -->
+    <div class="selector-group" id="lang-group" role="group" aria-label="言語選択">
+      <div class="selector-label">Language <span class="selector-hint">言語</span></div>
+      <div class="selector-btns" id="lang-btns">
+        <button class="sel-btn sel-btn--sm active" data-lang="javascript">JavaScript</button>
+        <button class="sel-btn sel-btn--sm" data-lang="python">Python</button>
+        <button class="sel-btn sel-btn--sm" data-lang="html">HTML</button>
+        <button class="sel-btn sel-btn--sm" data-lang="css">CSS</button>
+        <button class="sel-btn sel-btn--sm" data-lang="sql">SQL</button>
+      </div>
+    </div>
+
+    <!-- 難易度選択 -->
+    <div class="selector-group" role="group" aria-label="難易度選択">
+      <div class="selector-label">Difficulty <span class="selector-hint">難易度</span></div>
+      <div class="selector-btns" id="diff-btns">
+        <button class="sel-btn active" data-diff="easy">
+          <span class="sel-main">初級</span>
+          <span class="sel-sub">Short &amp; Simple</span>
+        </button>
+        <button class="sel-btn" data-diff="medium">
+          <span class="sel-main">中級</span>
+          <span class="sel-sub">Standard</span>
+        </button>
+        <button class="sel-btn" data-diff="hard">
+          <span class="sel-main">上級</span>
+          <span class="sel-sub">Long &amp; Complex</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- タイマー選択 -->
+    <div class="selector-group" role="group" aria-label="タイマー選択">
+      <div class="selector-label">Timer <span class="selector-hint">タイマー</span></div>
+      <div class="selector-btns" id="timer-btns">
+        <button class="sel-btn active" data-timer="race">
+          <span class="sel-main">完走</span>
+          <span class="sel-sub">最後まで</span>
+        </button>
+        <button class="sel-btn" data-timer="30">
+          <span class="sel-main">30秒</span>
+          <span class="sel-sub">短期集中</span>
+        </button>
+        <button class="sel-btn" data-timer="60">
+          <span class="sel-main">60秒</span>
+          <span class="sel-sub">1分チャレンジ</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- スタートボタン -->
+    <button id="btn-start" class="btn-start" aria-label="ゲームスタート">
+      <span class="btn-start-text">スタート</span>
+      <span class="btn-start-key">Press Enter</span>
+    </button>
+
+    <!-- ベストスコア表示 -->
+    <div id="start-best" class="start-best" aria-live="polite"></div>
+
+    <!-- 音量 -->
+    <button id="btn-sound-start" class="btn-sound" aria-label="サウンド切り替え" title="サウンド ON/OFF">🔊</button>
+  </div>
+
+
+  <!-- ========== ゲーム画面 ========== -->
+  <div id="screen-game" class="screen screen-game" hidden role="main">
+
+    <!-- ヘッダー統計 -->
+    <div class="stats-bar" role="status" aria-live="polite" aria-label="ゲーム統計">
+      <div class="stat-item">
+        <div class="stat-val" id="stat-wpm">0</div>
+        <div class="stat-label">WPM<span class="stat-hint">1分あたりの単語数</span></div>
+      </div>
+      <div class="stat-sep"></div>
+      <div class="stat-item">
+        <div class="stat-val" id="stat-acc">100%</div>
+        <div class="stat-label">Accuracy<span class="stat-hint">正確性</span></div>
+      </div>
+      <div class="stat-sep"></div>
+      <div class="stat-item">
+        <div class="stat-val" id="stat-streak">0</div>
+        <div class="stat-label">Streak<span class="stat-hint">連続正解</span></div>
+      </div>
+      <div class="stat-sep"></div>
+      <div class="stat-item stat-item--timer">
+        <div class="stat-val" id="stat-time">0:00</div>
+        <div class="stat-label">Time</div>
+      </div>
+    </div>
+
+    <!-- プログレスバー -->
+    <div class="progress-track" role="progressbar" aria-label="進捗" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+
+    <!-- テキスト表示エリア -->
+    <div class="typing-area" id="typing-area">
+
+      <!-- Mix モード: セグメントインジケーター -->
+      <div id="mix-indicator" class="mix-indicator" hidden aria-label="現在のセグメント"></div>
+
+      <!-- 日本語モード: ひらがな表示 -->
+      <div id="ja-display" class="ja-display" hidden aria-label="日本語テキスト"></div>
+
+      <!-- タイプ対象テキスト（文字スパン） -->
+      <div id="type-display" class="type-display" aria-label="タイプするテキスト"></div>
+
+      <!-- お題ラベル -->
+      <div class="item-label" id="item-label"></div>
+    </div>
+
+    <!-- 隠し入力欄（フォーカス受け取り用） -->
+    <input
+      id="game-input"
+      class="game-input"
+      type="text"
+      autocomplete="off"
+      autocorrect="off"
+      autocapitalize="off"
+      spellcheck="false"
+      aria-label="タイピング入力"
+      aria-hidden="true"
+    />
+
+    <!-- クリック促しプロンプト -->
+    <div id="click-prompt" class="click-prompt">
+      クリック or キーを押してスタート
+    </div>
+
+    <!-- ゲームコントロール -->
+    <div class="game-controls">
+      <button id="btn-skip"  class="gc-btn" title="次の問題 (Tab)">スキップ</button>
+      <button id="btn-pause" class="gc-btn" title="一時停止 (Esc)">一時停止</button>
+      <button id="btn-quit"  class="gc-btn gc-btn--danger" title="やめる">やめる</button>
+      <button id="btn-sound-game" class="gc-btn btn-sound" title="サウンド ON/OFF">🔊</button>
+    </div>
+  </div>
+
+
+  <!-- ========== 一時停止オーバーレイ ========== -->
+  <div id="pause-overlay" class="pause-overlay" hidden role="dialog" aria-label="一時停止中">
+    <div class="pause-card">
+      <div class="pause-title">一時停止</div>
+      <button id="btn-resume" class="btn-primary">再開 (Esc)</button>
+      <button id="btn-pause-quit" class="btn-secondary">やめる</button>
+    </div>
+  </div>
+
+
+  <!-- ========== リザルト画面 ========== -->
+  <div id="screen-result" class="screen screen-result" hidden role="main">
+
+    <div class="result-wrap">
+      <div class="result-card">
+        <div class="result-title" id="result-title">Complete!</div>
+
+        <div class="result-wpm-wrap">
+          <div class="result-wpm" id="result-wpm">0</div>
+          <div class="result-wpm-unit">WPM</div>
+        </div>
+
+        <div class="result-stats-grid">
+          <div class="rs-item">
+            <div class="rs-val" id="result-acc">100%</div>
+            <div class="rs-label">Accuracy<span class="rs-hint">正確性</span></div>
+          </div>
+          <div class="rs-item">
+            <div class="rs-val" id="result-time">0:00</div>
+            <div class="rs-label">Time</div>
+          </div>
+          <div class="rs-item">
+            <div class="rs-val" id="result-errors">0</div>
+            <div class="rs-label">ミス</div>
+          </div>
+          <div class="rs-item">
+            <div class="rs-val" id="result-combo">0</div>
+            <div class="rs-label">Max Streak<span class="rs-hint">最長連続正解</span></div>
+          </div>
+        </div>
+
+        <!-- ベスト更新バナー -->
+        <div id="result-best-banner" class="result-best-banner" hidden>
+          🎉 新記録！
+        </div>
+
+        <!-- アクションボタン -->
+        <div class="result-actions">
+          <button id="btn-retry"  class="btn-primary">もう一回</button>
+          <button id="btn-next"   class="btn-secondary">次の問題</button>
+          <button id="btn-home"   class="btn-ghost">トップ</button>
+        </div>
+      </div>
+
+      <!-- スコア履歴グラフ -->
+      <div class="history-card">
+        <div class="history-title">スコア履歴 <span class="history-hint">直近20件のWPM</span></div>
+        <canvas id="history-canvas" width="500" height="100" aria-label="スコア履歴グラフ"></canvas>
+        <div id="history-empty" class="history-empty" hidden>まだ記録がありません</div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ========== コンボエフェクト ========== -->
+  <div id="combo-overlay" class="combo-overlay" hidden aria-hidden="true">
+    <div class="combo-inner">
+      <span class="combo-num" id="combo-num"></span>
+      <span class="combo-word">COMBO!</span>
+    </div>
+  </div>
+
+  <!-- ========== トースト ========== -->
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- データ（グローバル変数として定義、file://対応） -->
+  <script src="js/words-data.js"></script>
+  <!-- メインスクリプト -->
+  <script src="js/script.js"></script>
+</body>
+</html>
