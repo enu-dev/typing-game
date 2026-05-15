@@ -449,8 +449,9 @@ button { cursor: pointer; border: none; background: none; font-family: inherit; 
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 500;
+  z-index: 9999;
   backdrop-filter: blur(4px);
+  pointer-events: auto;
 }
 .pause-card {
   background: var(--navy-mid);

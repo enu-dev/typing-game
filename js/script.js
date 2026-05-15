@@ -697,10 +697,12 @@
         if (!UI.el('screen-game').hidden) input.focus();
       });
 
-      // フォーカスが外れたら再取得
+      // フォーカスが外れたら再取得（ポーズ中は奪わない）
       input.addEventListener('blur', () => {
-        if (!UI.el('screen-game').hidden && !paused) {
-          setTimeout(() => { if (!UI.el('screen-game').hidden && !paused) input.focus(); }, 80);
+        if (!UI.el('screen-game').hidden && !paused && UI.el('pause-overlay').hidden) {
+          setTimeout(() => {
+            if (!UI.el('screen-game').hidden && !paused && UI.el('pause-overlay').hidden) input.focus();
+          }, 80);
         }
       });
     };
@@ -716,14 +718,16 @@
     const pauseGame = () => {
       paused = true;
       Engine.stop();
+      UI.el('game-input').blur();
       UI.el('pause-overlay').hidden = false;
+      setTimeout(() => UI.el('btn-resume').focus(), 0);
     };
 
     const resumeGame = () => {
       paused = false;
       UI.el('pause-overlay').hidden = true;
-      // 一時停止後のリスタートは同じアイテムで新規スタート
       setupGame(currentItem);
+      setTimeout(() => UI.el('game-input').focus(), 0);
     };
 
     const quitGame = () => {
