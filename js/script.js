@@ -126,7 +126,29 @@
     const getSettings  = () => { try { return JSON.parse(localStorage.getItem(KS)) || {}; } catch { return {}; } };
     const setSetting   = (k, v) => { const s = getSettings(); s[k] = v; try { localStorage.setItem(KS, JSON.stringify(s)); } catch {} };
 
-    return { save, getBest, getRecent, getSettings, setSetting };
+    // デイリーチャレンジ記録（モード別）
+    const KD = mode => `tgc:daily:${mode}`; // 'tgc:daily:code' | 'tgc:daily:japanese' | 'tgc:daily:mix'
+    const todayKey = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const getDailyRecord = mode => {
+      try { return (JSON.parse(localStorage.getItem(KD(mode))) || {})[todayKey()] || null; } catch { return null; }
+    };
+
+    const saveDaily = (mode, entry) => {
+      try {
+        const k   = KD(mode);
+        const all = JSON.parse(localStorage.getItem(k)) || {};
+        const key = todayKey();
+        if (!all[key] || entry.wpm > all[key].wpm) {
+          all[key] = { ...entry, date: new Date().toISOString() };
+          const kept = {};
+          Object.keys(all).sort().slice(-30).forEach(dk => { kept[dk] = all[dk]; });
+          localStorage.setItem(k, JSON.stringify(kept));
+        }
+      } catch {}
+    };
+
+    return { save, getBest, getRecent, getSettings, setSetting, getDailyRecord, saveDaily };
   })();
 
   /* ====================================================
@@ -160,6 +182,23 @@
       return p[0] || null;
     };
 
+    // セッション用：n問を重複なし優先で取得（プール不足時は再シャッフルして補充）
+    const getSession = (mode, lang, diff, n) => {
+      const p = pool(mode, lang, diff);
+      if (!p.length) return [];
+      if (p.length === 1) return Array(n).fill(p[0]);
+      const result = [];
+      let bag = shuffle([...p]);
+      for (let i = 0; i < n; i++) {
+        if (!bag.length) bag = shuffle([...p]);
+        // 連続同一問題を避ける
+        if (bag.length > 1 && result.length && bag[bag.length - 1].id === result[result.length - 1].id)
+          bag.unshift(bag.pop());
+        result.push(bag.pop());
+      }
+      return result;
+    };
+
     // 現在セグメントの「タイプ列」を取得
     // 日本語ローマ字はすべて小文字に正規化（data の表記揺れを吸収）
     const typeSeqOf = (item, segIdx) => {
@@ -182,7 +221,59 @@
       return { type: 'code', text: item.text };
     };
 
-    return { getNext, typeSeqOf, displayOf };
+    // ===== デイリーチャレンジ用シード乱数 =====
+    // mulberry32 PRNG — 同じシードから同じ順を再現する
+    const mulberry32 = seed => {
+      let s = seed >>> 0;
+      return () => {
+        s |= 0; s = s + 0x6D2B79F5 | 0;
+        let t = Math.imul(s ^ s >>> 15, 1 | s);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    };
+
+    const todaySeed = () => {
+      const d = new Date();
+      return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    };
+
+    // モード別デイリーセッション（日付シードで固定）
+    const DAILY_SEED_OFFSET = { code: 0, japanese: 10000, mix: 20000 };
+
+    const getDailySession = (mode = 'code', n = 10) => {
+      const D = WORDS_DATA;
+      let p = [];
+      if (mode === 'code') {
+        p = [
+          ...(D.code?.javascript?.easy   || []),
+          ...(D.code?.javascript?.medium || []),
+          ...(D.code?.javascript?.hard   || []),
+        ];
+      } else if (mode === 'japanese') {
+        p = Object.values(D.japanese || {}).flatMap(cat => [
+          ...(cat.easy   || []),
+          ...(cat.medium || []),
+        ]);
+      } else if (mode === 'mix') {
+        p = [
+          ...(D.mix?.easy   || []),
+          ...(D.mix?.medium || []),
+          ...(D.mix?.hard   || []),
+        ];
+      }
+      if (!p.length) return [];
+      const seed = todaySeed() + (DAILY_SEED_OFFSET[mode] || 0);
+      const rng  = mulberry32(seed);
+      const arr  = [...p];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr.slice(0, Math.min(n, arr.length));
+    };
+
+    return { getNext, getSession, getDailySession, typeSeqOf, displayOf };
   })();
 
   /* ====================================================
@@ -214,6 +305,7 @@
       const prog = S.typeSeq.length ? Math.round(S.typed.length / S.typeSeq.length * 100) : 0;
       return {
         wpm, acc, errors: S.errors,
+        correctKeys: S.correctKeys, totalKeys: S.totalKeys,
         combo: S.combo, maxCombo: S.maxCombo,
         elapsed: Math.round(el), elapsedRaw: el,
         typed: S.typed, typeSeq: S.typeSeq, segIdx: S.segIdx, item: S.item,
@@ -414,13 +506,61 @@
       comboTm = setTimeout(() => { ov.hidden = true; }, 720);
     };
 
+    // ----- セッション進捗 -----
+    const updateSessionProgress = (current, total) => {
+      el('stat-session').textContent = `${current}/${total}`;
+    };
+
+    // ----- デイリーステータス（スタート画面） -----
+    const updateDailyStatus = () => {
+      const d = new Date();
+      const dateStr = d.toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' });
+      el('daily-date-label').textContent = dateStr;
+      ['code', 'japanese', 'mix'].forEach(mode => {
+        const rec   = ScoreDB.getDailyRecord(mode);
+        const badge = el(`daily-done-${mode}`);
+        if (!badge) return;
+        if (rec) {
+          badge.hidden = false;
+          badge.textContent = `✓ ${rec.wpm} WPM`;
+        } else {
+          badge.hidden = true;
+        }
+      });
+    };
+
+    // ----- デイリーバッジ（ゲーム画面） -----
+    const MODE_ICON  = { code: '💻', japanese: '🇯🇵', mix: '⚡' };
+    const MODE_LABEL = { code: 'CODE', japanese: '日本語', mix: 'MIX' };
+    const setDailyBadge = (visible, mode) => {
+      const b = el('daily-badge');
+      b.hidden = !visible;
+      if (visible && mode) b.textContent = `🗓️ DAILY — ${MODE_ICON[mode] || ''} ${MODE_LABEL[mode] || mode}`;
+    };
+
+    // ----- 問題クリアフラッシュ -----
+    const flashQuestionClear = (completedNum, total) => {
+      const wrap = el('type-display');
+      for (const c of wrap.children) c.className = 'char correct';
+      el('item-label').textContent = `✓ 問 ${completedNum}/${total} クリア！`;
+      el('item-label').classList.add('label-clear');
+      el('typing-area').classList.add('question-clear');
+      setTimeout(() => el('typing-area').classList.remove('question-clear'), 600);
+    };
+
     // ----- リザルト -----
     const showResult = (st, isNewBest) => {
-      el('result-title').textContent = st.timedOut ? 'Time Up!' : 'Complete!';
-      el('result-wpm').textContent   = st.wpm;
-      el('result-acc').textContent   = st.acc + '%';
+      const completed = st.questionsCompleted ?? 1;
+      const total     = st.questionsTotal     ?? 1;
+      let title;
+      if (st.timedOut)     title = `Time Up！ ${completed}/${total}問`;
+      else if (st.isDaily) title = `🗓️ ${completed}問 完走！`;
+      else                 title = `${completed}問 完走！`;
+      el('result-title').textContent  = title;
+      el('result-wpm').textContent    = st.wpm;
+      el('result-acc').textContent    = st.acc + '%';
       const e = Math.round(st.elapsedRaw || st.elapsed || 0);
-      el('result-time').textContent  = Math.floor(e/60) + ':' + String(e%60).padStart(2,'0');
+      el('result-time').textContent   = Math.floor(e/60) + ':' + String(e%60).padStart(2,'0');
       el('result-errors').textContent = st.errors;
       el('result-combo').textContent  = st.maxCombo;
       el('result-best-banner').hidden = !isNewBest;
@@ -507,7 +647,9 @@
     return {
       showScreen, buildChars, updateChars, setJaDisplay, setMixIndicator,
       updateStats, shake, showCombo, showResult, drawChart,
-      toast, showBest, setPromptVisible, el,
+      toast, showBest, setPromptVisible,
+      updateSessionProgress, flashQuestionClear,
+      updateDailyStatus, setDailyBadge, el,
     };
   })();
 
@@ -515,12 +657,20 @@
      App — イベント統合・状態管理
      ==================================================== */
   const App = (() => {
+    const SESSION_SIZE = 10;
+
     let cfg = { mode: 'code', lang: 'javascript', diff: 'easy', timerMode: 'race', timeLimit: 0 };
     let currentItem  = null;
     let started      = false;
     let paused       = false;
     let composing    = false;
     let lastSegIdx   = -1;   // ミックスモードのセグメント変化検出
+
+    // セッション状態
+    // { items, idx, startTime, correctKeys, totalKeys, errors, maxCombo, combo }
+    let session    = null;
+    let dailyMode  = null;   // デイリーチャレンジ中モード ('code'|'japanese'|'mix'|null)
+    let lastResult = null;   // Xシェア用に最後の結果を保持
 
     // ===== 設定読込 =====
     const loadSettings = () => {
@@ -595,38 +745,132 @@
       });
 
       UI.el('btn-start').addEventListener('click', beginGame);
+      UI.el('btn-daily-code').addEventListener('click',     () => beginDaily('code'));
+      UI.el('btn-daily-japanese').addEventListener('click', () => beginDaily('japanese'));
+      UI.el('btn-daily-mix').addEventListener('click',      () => beginDaily('mix'));
       ['btn-sound-start', 'btn-sound-game'].forEach(id =>
         UI.el(id)?.addEventListener('click', toggleSound)
       );
     };
 
-    // ===== ゲーム開始 =====
+    // ===== セッション開始 =====
     const beginGame = () => {
-      const item = GameData.getNext(cfg.mode, cfg.lang, cfg.diff);
-      if (!item) { UI.toast('お題が見つかりませんでした。言語または難易度を変更してください。'); return; }
-      setupGame(item);
+      dailyMode = null;
+      UI.setDailyBadge(false, null);
+      const items = GameData.getSession(cfg.mode, cfg.lang, cfg.diff, SESSION_SIZE);
+      if (!items.length) { UI.toast('お題が見つかりませんでした。言語または難易度を変更してください。'); return; }
+      session = { items, idx: 0, startTime: null, correctKeys: 0, totalKeys: 0, errors: 0, maxCombo: 0, combo: 0 };
+      setupQuestion(session.items[0]);
       UI.showScreen('game');
       UI.el('game-input').focus();
     };
 
-    const setupGame = item => {
+    // ===== デイリーチャレンジ開始 =====
+    const beginDaily = mode => {
+      const items = GameData.getDailySession(mode, SESSION_SIZE);
+      if (!items.length) { UI.toast('デイリーチャレンジを準備できませんでした'); return; }
+      dailyMode = mode;
+      session = { items, idx: 0, startTime: null, correctKeys: 0, totalKeys: 0, errors: 0, maxCombo: 0, combo: 0 };
+      setupQuestion(session.items[0]);
+      UI.showScreen('game');
+      UI.setDailyBadge(true, mode);
+      UI.el('game-input').focus();
+    };
+
+    // ===== 1問セットアップ（セッション状態を保持したまま問題を入れ替える）=====
+    const setupQuestion = item => {
       currentItem = item;
-      started  = false;
-      paused   = false;
-      lastSegIdx = 0; // 0 に初期化して初回 update で二重ビルドを防ぐ
+      started    = false;
+      paused     = false;
+      lastSegIdx = 0;
 
       const typeSeq = GameData.typeSeqOf(item, 0);
       UI.buildChars(typeSeq);
       UI.el('item-label').textContent = item.label || '';
+      UI.el('item-label').classList.remove('label-clear');
       updateSegmentUI(item, 0);
 
-      Engine.start(item, {
-        mode: cfg.mode, lang: cfg.lang, diff: cfg.diff,
-        timerMode: cfg.timerMode, timeLimit: cfg.timeLimit,
+      // タイマーモード：セッション残り時間を渡す
+      let timerMode = cfg.timerMode;
+      let timeLimit = cfg.timeLimit;
+      if (cfg.timerMode !== 'race' && session?.startTime) {
+        const elapsed = (Date.now() - session.startTime) / 1000;
+        timeLimit = Math.max(1, cfg.timeLimit - elapsed);
+      }
+
+      Engine.start(item, { mode: cfg.mode, lang: cfg.lang, diff: cfg.diff, timerMode, timeLimit });
+
+      // 初期統計表示（セッション経過時間ベース）
+      const dispEl = session?.startTime ? (Date.now() - session.startTime) / 1000 : 0;
+      UI.updateStats({
+        wpm: 0, acc: 100, combo: session?.combo || 0,
+        elapsed: Math.round(dispEl), elapsedRaw: dispEl,
+        timerMode: cfg.timerMode,
+        timeLeft: cfg.timerMode !== 'race' ? Math.max(0, cfg.timeLimit - dispEl) : null,
+        progress: 0,
       });
-      UI.updateStats({ wpm:0, acc:100, combo:0, elapsed:0, elapsedRaw:0,
-                       timerMode: cfg.timerMode, timeLeft: cfg.timeLimit || null, progress:0 });
       UI.setPromptVisible(true);
+      if (session) UI.updateSessionProgress(session.idx + 1, session.items.length);
+    };
+
+    // ===== セッション終了・リザルト表示 =====
+    const finishSession = timedOut => {
+      const sessionEl = session?.startTime ? (Date.now() - session.startTime) / 1000 : 0;
+      const wpm = sessionEl > 0
+        ? Math.round((session.correctKeys / 5) / (sessionEl / 60))
+        : 0;
+      const acc = session.totalKeys > 0
+        ? Math.round(session.correctKeys / session.totalKeys * 100)
+        : 100;
+      const questionsCompleted = session.idx + (timedOut ? 0 : 1);
+
+      // 新記録判定（保存前に確認）
+      const prevRecord = dailyMode
+        ? ScoreDB.getDailyRecord(dailyMode)
+        : ScoreDB.getBest(cfg.mode, cfg.lang, cfg.diff);
+      const isNewBest = !prevRecord || wpm > prevRecord.wpm;
+
+      // スコア保存
+      if (dailyMode) {
+        ScoreDB.saveDaily(dailyMode, { wpm, acc, errors: session.errors, maxCombo: session.maxCombo });
+        UI.updateDailyStatus(); // スタート画面のバッジを更新
+      } else {
+        ScoreDB.save({
+          wpm, acc, errors: session.errors,
+          maxCombo: session.maxCombo, elapsed: Math.round(sessionEl),
+          mode: cfg.mode, lang: cfg.lang, diff: cfg.diff,
+        });
+      }
+
+      const result = {
+        wpm, acc,
+        errors:             session.errors,
+        maxCombo:           session.maxCombo,
+        elapsed:            Math.round(sessionEl),
+        elapsedRaw:         sessionEl,
+        timedOut,
+        questionsCompleted,
+        questionsTotal:     session.items.length,
+        isDaily: dailyMode !== null,
+      };
+      lastResult = result; // Xシェア用に保持
+
+      if (!timedOut) { Particles.spawn(130); Audio.complete(); }
+
+      setTimeout(() => {
+        UI.showResult(result, isNewBest);
+        if (dailyMode) {
+          // デイリーは専用メッセージ
+          UI.el('history-canvas').hidden = true;
+          UI.el('history-empty').hidden  = false;
+          UI.el('history-empty').textContent = 'Xでシェアして記録を残そう 📣';
+        } else {
+          UI.el('history-canvas').hidden = false;
+          const rec = ScoreDB.getRecent(cfg.mode, cfg.lang, cfg.diff, 20);
+          UI.drawChart(UI.el('history-canvas'), rec);
+          UI.el('history-empty').hidden = rec.length >= 2;
+        }
+      }, 350);
     };
 
     // セグメントに応じた UI 更新
@@ -675,6 +919,8 @@
         // ゲーム未開始なら開始
         if (!started) {
           started = true;
+          // セッション最初のキー入力でセッション開始時刻を記録
+          if (session && !session.startTime) session.startTime = Date.now();
           UI.setPromptVisible(false);
           input.focus();
         }
@@ -710,9 +956,13 @@
     // ===== ゲームコントロール =====
     const skipItem = () => {
       Engine.stop();
-      const next = GameData.getNext(cfg.mode, cfg.lang, cfg.diff, currentItem?.id);
-      if (!next) { UI.toast('お題がありません'); return; }
-      setupGame(next);
+      if (!session) return;
+      if (session.idx >= session.items.length - 1) {
+        finishSession(false);
+        return;
+      }
+      session.idx++;
+      setupQuestion(session.items[session.idx]);
     };
 
     const pauseGame = () => {
@@ -724,16 +974,44 @@
     };
 
     const resumeGame = () => {
+      if (!currentItem) {
+        UI.el('pause-overlay').hidden = true;
+        UI.showScreen('start');
+        return;
+      }
       paused = false;
       UI.el('pause-overlay').hidden = true;
-      setupGame(currentItem);
+      setupQuestion(currentItem);
       setTimeout(() => UI.el('game-input').focus(), 0);
     };
 
     const quitGame = () => {
       Engine.stop();
+      session   = null;
+      dailyMode = null;
+      UI.setDailyBadge(false, null);
       UI.showScreen('start');
       UI.showBest(cfg.mode, cfg.lang, cfg.diff);
+    };
+
+    // ===== Xシェア =====
+    const shareToX = () => {
+      if (!lastResult) return;
+      const modeLabel = dailyMode
+        ? `🗓️ デイリー ${dailyMode === 'code' ? 'Code' : dailyMode === 'japanese' ? '日本語' : 'Mix'}`
+        : cfg.mode === 'japanese' ? '日本語モード'
+        : cfg.mode === 'mix'      ? 'Mixモード'
+        : `${cfg.lang} ${cfg.diff}`;
+      const lines = [
+        `TypeCode で ${lastResult.wpm} WPM 達成！`,
+        `正確性 ${lastResult.acc}% | ${lastResult.questionsCompleted}問完走`,
+        modeLabel,
+        '',
+        'あなたも試してみて👇',
+      ];
+      const url  = window.location.href.split('?')[0];
+      const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(lines.join('\n'))}&url=${encodeURIComponent(url)}`;
+      window.open(tweetUrl, '_blank', 'noopener,noreferrer');
     };
 
     const bindGameControls = () => {
@@ -750,11 +1028,17 @@
     // ===== エンジンイベント =====
     const bindEngine = () => {
       Engine.on('update', st => {
-        UI.updateStats(st);
+        // 完走モードはセッション経過時間をタイマーに表示する
+        let displaySt = st;
+        if (cfg.timerMode === 'race' && session?.startTime) {
+          const sessionEl = (Date.now() - session.startTime) / 1000;
+          displaySt = { ...st, elapsed: Math.round(sessionEl), elapsedRaw: sessionEl };
+        }
+        UI.updateStats(displaySt);
         UI.updateChars(st.typed, st.typeSeq);
 
-        // ミックスモード: セグメント変化検出
-        if (cfg.mode === 'mix' && st.item?.segments && st.segIdx !== lastSegIdx) {
+        // ミックスモード / デイリーMix: セグメント変化検出
+        if (st.item?.segments && st.segIdx !== lastSegIdx) {
           lastSegIdx = st.segIdx;
           UI.buildChars(st.typeSeq);
           updateSegmentUI(st.item, st.segIdx);
@@ -763,7 +1047,6 @@
       });
 
       Engine.on('segment', st => {
-        // セグメント完了時（次セグメントへ）
         UI.updateStats(st);
       });
 
@@ -775,43 +1058,60 @@
       });
 
       Engine.on('complete', st => {
-        const prevBest = ScoreDB.getBest(cfg.mode, cfg.lang, cfg.diff);
-        ScoreDB.save({
-          wpm: st.wpm, acc: st.acc, errors: st.errors,
-          maxCombo: st.maxCombo, elapsed: st.elapsed,
-          mode: cfg.mode, lang: cfg.lang, diff: cfg.diff,
-        });
-        const isNewBest = !prevBest || st.wpm > prevBest.wpm;
+        if (!session) return;
 
-        if (!st.timedOut) {
-          Particles.spawn(130);
-          Audio.complete();
+        // セッション統計を累積
+        session.correctKeys += st.correctKeys || 0;
+        session.totalKeys   += st.totalKeys   || 0;
+        session.errors      += st.errors;
+        session.maxCombo     = Math.max(session.maxCombo, st.maxCombo);
+        session.combo        = st.combo;
+
+        // タイムアウトでセッション終了
+        if (st.timedOut) {
+          finishSession(true);
+          return;
         }
 
+        // 最終問題完了 → セッション完了
+        if (session.idx >= session.items.length - 1) {
+          finishSession(false);
+          return;
+        }
+
+        // 次の問題へ自動遷移（600ms 間隔）
+        Audio.click();
+        UI.flashQuestionClear(session.idx + 1, session.items.length);
         setTimeout(() => {
-          UI.showResult(st, isNewBest);
-          const rec = ScoreDB.getRecent(cfg.mode, cfg.lang, cfg.diff, 20);
-          const canvas = UI.el('history-canvas');
-          UI.drawChart(canvas, rec);
-          UI.el('history-empty').hidden = rec.length >= 2;
-        }, 350);
+          session.idx++;
+          setupQuestion(session.items[session.idx]);
+        }, 600);
       });
     };
 
     // ===== リザルト画面 =====
     const bindResult = () => {
-      UI.el('btn-retry').addEventListener('click', beginGame);
-      UI.el('btn-next').addEventListener('click', () => {
-        const next = GameData.getNext(cfg.mode, cfg.lang, cfg.diff, currentItem?.id);
-        if (!next) { UI.toast('お題がありません'); return; }
-        setupGame(next);
-        UI.showScreen('game');
-        UI.el('game-input').focus();
+      // もう一回：同じ問題セットで再挑戦
+      UI.el('btn-retry').addEventListener('click', () => {
+        if (session?.items?.length) {
+          const items = [...session.items];
+          session = { items, idx: 0, startTime: null, correctKeys: 0, totalKeys: 0, errors: 0, maxCombo: 0, combo: 0 };
+          setupQuestion(session.items[0]);
+          UI.showScreen('game');
+          UI.el('game-input').focus();
+        } else {
+          beginGame();
+        }
       });
+      // 別セット：新しい10問でセッション開始
+      UI.el('btn-next').addEventListener('click', beginGame);
       UI.el('btn-home').addEventListener('click', () => {
+        session   = null;
+        dailyMode = null;
         UI.showScreen('start');
         UI.showBest(cfg.mode, cfg.lang, cfg.diff);
       });
+      UI.el('btn-share-x').addEventListener('click', shareToX);
     };
 
     // ===== サウンド =====
@@ -852,6 +1152,7 @@
       bindResult();
       UI.showScreen('start');
       UI.showBest(cfg.mode, cfg.lang, cfg.diff);
+      UI.updateDailyStatus(); // デイリーボタンの完了状態を初期表示
     };
 
     return { init };

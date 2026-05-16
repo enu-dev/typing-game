@@ -44,6 +44,9 @@ body {
 }
 button { cursor: pointer; border: none; background: none; font-family: inherit; }
 
+/* hidden 属性を CSS の display 宣言より確実に優先させる */
+[hidden] { display: none !important; }
+
 /* ===== パーティクルキャンバス ===== */
 #particle-canvas {
   position: fixed;
@@ -187,6 +190,63 @@ button { cursor: pointer; border: none; background: none; font-family: inherit; 
   min-height: 1.2em;
 }
 
+/* ===== デイリーチャレンジ（スタート画面） ===== */
+.daily-wrap {
+  width: 100%;
+  max-width: 640px;
+}
+.daily-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 0 2px;
+}
+.daily-header-text {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--text-sub);
+}
+.daily-header-date {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+.daily-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.btn-daily {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 8px;
+  background: var(--navy-mid);
+  border: 2px solid var(--navy-border);
+  border-radius: var(--radius);
+  color: var(--text-sub);
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+.btn-daily:hover {
+  border-color: var(--orange);
+  color: var(--text);
+  background: rgba(204, 120, 92, 0.08);
+}
+.btn-daily-icon  { font-size: 1.4rem; line-height: 1; }
+.btn-daily-label { font-size: 0.82rem; font-weight: 700; }
+.btn-daily-done {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--correct);
+  background: rgba(76, 175, 80, 0.1);
+  border: 1px solid var(--correct);
+  border-radius: 99px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
 /* サウンドボタン（スタート画面右下固定） */
 .btn-sound {
   position: absolute;
@@ -266,6 +326,7 @@ button { cursor: pointer; border: none; background: none; font-family: inherit; 
 /* WPM 高い時の色変化 */
 .stat-val.wpm-high   { color: var(--blue); }
 .stat-val.wpm-super  { color: var(--orange); text-shadow: 0 0 12px var(--orange); }
+.stat-val--sm        { font-size: 1.1rem; }
 
 /* ===== プログレスバー ===== */
 .progress-track {
@@ -373,7 +434,9 @@ button { cursor: pointer; border: none; background: none; font-family: inherit; 
   font-size: 0.75rem;
   color: var(--text-faint);
   letter-spacing: 0.3px;
+  transition: color 0.2s;
 }
+.item-label.label-clear { color: var(--correct); font-weight: 700; }
 
 /* 隠し入力 */
 .game-input {
@@ -437,6 +500,28 @@ button { cursor: pointer; border: none; background: none; font-family: inherit; 
   100% { background: transparent; }
 }
 .flash-error { animation: flash-red 0.3s ease; }
+
+/* ===== デイリーバッジ（ゲーム画面） ===== */
+.daily-badge {
+  align-self: center;
+  background: rgba(204, 120, 92, 0.12);
+  border: 1px solid var(--orange);
+  border-radius: 0 0 var(--radius) var(--radius);
+  color: var(--orange);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+  padding: 3px 18px;
+  text-transform: uppercase;
+  margin-bottom: -4px;
+}
+
+/* ===== 問題クリアフラッシュ ===== */
+@keyframes question-clear-glow {
+  0%, 65% { background: rgba(76, 175, 80, 0.12); }
+  100%     { background: transparent; }
+}
+.typing-area.question-clear { animation: question-clear-glow 0.6s ease; }
 
 
 /* =====================================================
@@ -708,6 +793,21 @@ button { cursor: pointer; border: none; background: none; font-family: inherit; 
   transition: color var(--transition);
 }
 .btn-ghost:hover { color: var(--text); }
+
+/* ===== 𝕏 シェアボタン ===== */
+.btn-share-x {
+  width: 100%;
+  padding: 10px 0;
+  background: #000;
+  border-radius: var(--radius);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  letter-spacing: 0.3px;
+  transition: opacity var(--transition);
+  margin-top: 4px;
+}
+.btn-share-x:hover { opacity: 0.82; }
 
 
 /* =====================================================

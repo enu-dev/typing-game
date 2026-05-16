@@ -101,6 +101,31 @@
     <!-- ベストスコア表示 -->
     <div id="start-best" class="start-best" aria-live="polite"></div>
 
+    <!-- デイリーチャレンジ（3モード） -->
+    <div class="daily-wrap">
+      <div class="daily-header">
+        <span class="daily-header-text">🗓️ デイリーチャレンジ</span>
+        <span class="daily-header-date" id="daily-date-label"></span>
+      </div>
+      <div class="daily-grid">
+        <button id="btn-daily-code" class="btn-daily" aria-label="コードデイリーチャレンジ">
+          <span class="btn-daily-icon">💻</span>
+          <span class="btn-daily-label">Code</span>
+          <span class="btn-daily-done" id="daily-done-code" hidden></span>
+        </button>
+        <button id="btn-daily-japanese" class="btn-daily" aria-label="日本語デイリーチャレンジ">
+          <span class="btn-daily-icon">🇯🇵</span>
+          <span class="btn-daily-label">日本語</span>
+          <span class="btn-daily-done" id="daily-done-japanese" hidden></span>
+        </button>
+        <button id="btn-daily-mix" class="btn-daily" aria-label="ミックスデイリーチャレンジ">
+          <span class="btn-daily-icon">⚡</span>
+          <span class="btn-daily-label">Mix</span>
+          <span class="btn-daily-done" id="daily-done-mix" hidden></span>
+        </button>
+      </div>
+    </div>
+
     <!-- 音量 -->
     <button id="btn-sound-start" class="btn-sound" aria-label="サウンド切り替え" title="サウンド ON/OFF">🔊</button>
   </div>
@@ -130,12 +155,20 @@
         <div class="stat-val" id="stat-time">0:00</div>
         <div class="stat-label">Time</div>
       </div>
+      <div class="stat-sep"></div>
+      <div class="stat-item">
+        <div class="stat-val stat-val--sm" id="stat-session">1/10</div>
+        <div class="stat-label">問題<span class="stat-hint">セッション進捗</span></div>
+      </div>
     </div>
 
     <!-- プログレスバー -->
     <div class="progress-track" role="progressbar" aria-label="進捗" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
       <div class="progress-fill" id="progress-fill"></div>
     </div>
+
+    <!-- デイリーバッジ（デイリーチャレンジ時のみ表示） -->
+    <div id="daily-badge" class="daily-badge" hidden aria-label="デイリーチャレンジ中">🗓️ DAILY CHALLENGE</div>
 
     <!-- テキスト表示エリア -->
     <div class="typing-area" id="typing-area">
@@ -230,9 +263,12 @@
         <!-- アクションボタン -->
         <div class="result-actions">
           <button id="btn-retry"  class="btn-primary">もう一回</button>
-          <button id="btn-next"   class="btn-secondary">次の問題</button>
+          <button id="btn-next"   class="btn-secondary">別セット</button>
           <button id="btn-home"   class="btn-ghost">トップ</button>
         </div>
+
+        <!-- Xシェアボタン -->
+        <button id="btn-share-x" class="btn-share-x">𝕏 シェア</button>
       </div>
 
       <!-- スコア履歴グラフ -->
